@@ -2,8 +2,8 @@ package com.dreamteam.breakloop_analytics.service;
 
 import com.dreamteam.breakloop_analytics.model.FocusAnalytics;
 import com.google.api.core.ApiFuture;
-import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import org.springframework.stereotype.Service;
 
@@ -23,7 +23,7 @@ public class AnalyticsService {
         ApiFuture<QuerySnapshot> future =
                 firestore.collectionGroup("focusSessions").get();
 
-        List<DocumentSnapshot> sessions =
+        List<QueryDocumentSnapshot> sessions =
                 future.get().getDocuments();
 
         int totalSessions = sessions.size();
@@ -32,7 +32,7 @@ public class AnalyticsService {
 
         double totalDuration = 0;
 
-        for (DocumentSnapshot session : sessions) {
+        for (QueryDocumentSnapshot session : sessions) {
 
             String status = session.getString("status");
             Long duration = session.getLong("duration");
