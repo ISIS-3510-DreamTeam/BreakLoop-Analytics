@@ -58,3 +58,17 @@ To replace a "pending" placeholder, remove its entry from the pending list at th
 ./mvnw test -Dtest='Bq12*Test'
 ```
 These need no credentials. (`BreakloopAnalyticsApplicationTests` loads the full context and may need them.)
+
+## Focus analytics — quick run (Windows)
+
+To run the focus analytics, use:
+
+```powershell
+correr spring boot
+
+mvn spring-boot:run
+Invoke-RestMethod http://localhost:8080/api/analytics/focus
+```
+
+.\mvnw.cmd spring-boot:run
+ http://localhost:8080/api/analytics/focus
