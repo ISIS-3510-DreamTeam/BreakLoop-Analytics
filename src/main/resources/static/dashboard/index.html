@@ -228,10 +228,38 @@ addSection({ id: 'focus', bq: 'Focus', owner: 'Valentina', title: 'Focus Mode se
       kpi(Math.round(d.averageDurationSeconds) + ' s', 'Average duration')));
   } });
 
+  /* ---------- BQ8 (Juan Felipe) ---------- */
+addSection({ id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', title: 'Does the virtual pet help users focus longer?',
+  question: 'Do users with an active virtual pet complete longer uninterrupted Focus Mode/Pomodoro sessions than users without one?',
+  endpoint: '/api/analytics/bq8',
+  render: (d, body) => {
+    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+    const group = (name, g) => g.hidden
+      ? el('p', { class: 'pending', text: `${name}: hidden (fewer than ${d.minUsers} users).` })
+      : el('div', {}, el('h3', { text: name }), el('div', { class: 'kpis' },
+          kpi(g.users, 'Users'),
+          kpi(g.sessions, 'Focus sessions'),
+          kpi(g.avgCompletedMinutes.toFixed(1) + ' min', 'Avg. completed session'),
+          kpi(pct(g.completionRate), 'Completed without interruption')));
+
+    body.append(group('With active pet', d.withPet), group('Without pet', d.withoutPet));
+
+    if (d.differenceMinutes !== null) {
+      body.append(el('h3', { text: 'Average completed session (minutes)' }), barChart([
+        { label: 'With pet', parts: [{ value: +d.withPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-a)', title: 'Minutes' }] },
+        { label: 'Without pet', parts: [{ value: +d.withoutPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-b)', title: 'Minutes' }] },
+      ]));
+      const diff = d.differenceMinutes;
+      body.append(el('p', { class: 'note', text: diff >= 0
+        ? `Users with an active pet complete sessions ${diff.toFixed(1)} min longer on average.`
+        : `Users with an active pet complete sessions ${Math.abs(diff).toFixed(1)} min shorter on average.` }));
+    }
+    body.append(el('p', { class: 'note', text: 'Uninterrupted = session with status COMPLETED. Users are grouped by their current activePetId. A group is hidden when fewer than the minimum number of distinct users contributed.' }));
+  } });
+
 /* ---------- Pending sections ---------- */
 [
   { id: 'bq6', bq: 'BQ6', owner: 'Pablo', question: 'How much screen time does the user avoid after accepting a personalized offline activity recommendation?' },
-  { id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', question: 'Do users with an active virtual pet complete longer uninterrupted Focus Mode/Pomodoro sessions than users without one?' },
   { id: 'bq2', bq: 'BQ2', owner: 'Hernán', question: 'Which device models experience the highest battery consumption while running BreakLoop?' },
   { id: 'bq14', bq: 'BQ14', owner: 'Valentina', question: 'Is there a relationship between phone-checking frequency, time on flagged apps, and Focus Mode completion?' },
   { id: 'bq7', bq: 'BQ7', owner: 'Laura', question: 'Do users who used Check Counter longer show a greater reduction in weekly pickups?' },
