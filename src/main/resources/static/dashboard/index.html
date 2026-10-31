@@ -1,333 +1,853 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BreakLoop Analytics</title>
-<style>
-  :root {
-    --bg: #f5f7f6; --card: #ffffff; --ink: #28373a; --muted: #6b7c80; --line: #dfe6e5;
-    --accent: #3f8f8a; --accent-soft: #e3f1ef; --hidden: #eceff0;
-    --bar-a: #6fb3a8; --bar-b: #a9c6dd; --bar-c: #d9c9a3;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #1b2426; --card: #243032; --ink: #e2ebeb; --muted: #94a6a9; --line: #35464a;
-            --accent: #6fb3a8; --accent-soft: #2c4244; --hidden: #2b383b; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header, main { max-width: 960px; margin: 0 auto; padding: 0 16px; }
-  header { padding-top: 28px; }
-  h1 { font-size: 24px; margin: 0 0 4px; font-weight: 600; }
-  header p { margin: 0; color: var(--muted); }
-  section.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-                 padding: 20px; margin: 20px 0; }
-  .tag { display: inline-block; font-size: 12px; color: var(--accent); background: var(--accent-soft);
-         padding: 2px 10px; border-radius: 999px; margin-bottom: 6px; }
-  h2 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
-  .question { color: var(--muted); margin: 0 0 14px; }
-  .pending { color: var(--muted); font-style: italic; }
-  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; }
-  label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
-  input, select, button { font: inherit; padding: 6px 10px; border: 1px solid var(--line);
-         border-radius: 8px; background: var(--card); color: var(--ink); }
-  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
-  .note { font-size: 13px; color: var(--muted); background: var(--bg); border-radius: 8px;
-          padding: 10px 12px; margin-top: 14px; }
-  .error { color: #8a5a44; }
-  h3 { font-size: 14px; margin: 18px 0 8px; font-weight: 600; }
-  .scroll { overflow-x: auto; }
-  table.heat { border-collapse: separate; border-spacing: 4px; width: 100%; min-width: 420px; }
-  .heat th { font-size: 12px; font-weight: 500; color: var(--muted); text-align: center; }
-  .heat th.row { text-align: left; }
-  .heat td { text-align: center; border-radius: 8px; padding: 10px 6px; font-size: 13px; }
-  .heat td small { display: block; color: inherit; opacity: .75; }
-  .heat td.hidden { background: var(--hidden); color: var(--muted); font-size: 12px; }
-  .legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  .bars { display: grid; gap: 6px; }
-  .bar-row { display: grid; grid-template-columns: 120px 1fr 40px; gap: 8px; align-items: center; font-size: 13px; }
-  .bar-track { background: var(--hidden); border-radius: 6px; height: 14px; overflow: hidden; display: flex; }
-  .bar-track span { height: 100%; }
-  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-  .kpi { background: var(--bg); border-radius: 10px; padding: 12px; }
-  .kpi b { display: block; font-size: 22px; font-weight: 600; }
-  .kpi span { font-size: 12px; color: var(--muted); }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
-  footer { max-width: 960px; margin: 0 auto 32px; padding: 0 16px; font-size: 12px; color: var(--muted); }
-</style>
-</head>
-<body>
-<header>
-  <h1>BreakLoop Analytics</h1>
-  <p>Business questions answered from anonymized, aggregated app data.</p>
-</header>
-<main id="sections"></main>
-<footer>No user identifiers or coordinates are shown anywhere on this page.</footer>
-
-<script>
-/* ---------- Helpers ---------- */
-const $ = (sel, root = document) => root.querySelector(sel);
-const el = (tag, attrs = {}, ...kids) => {
-  const n = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else n.setAttribute(k, v);
-  }
-  kids.flat().forEach(c => n.append(c));
-  return n;
-};
-const pct = x => (x * 100).toFixed(0) + '%';
-const fetchJson = async url => {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-};
-
-/* Horizontal stacked bars. rows: [{label, parts:[{value, color, title}]}] */
-function barChart(rows) {
-  const max = Math.max(1, ...rows.map(r => r.parts.reduce((s, p) => s + p.value, 0)));
-  return el('div', { class: 'bars' }, rows.map(r => {
-    const total = r.parts.reduce((s, p) => s + p.value, 0);
-    return el('div', { class: 'bar-row' },
-      el('div', { text: r.label }),
-      el('div', { class: 'bar-track' }, r.parts.map(p => {
-        const s = el('span', { title: `${p.title}: ${p.value}` });
-        s.style.width = (p.value / max * 100) + '%'; s.style.background = p.color; return s;
-      })),
-      el('div', { text: total }));
-  }));
-}
-
-/* ---------- Section registry ---------- */
-function addSection({ id, bq, owner, title, question, endpoint, render, setup }) {
-  const body = el('div');
-  const sec = el('section', { class: 'card', id },
-    el('span', { class: 'tag', text: `${bq} · ${owner}` }),
-    title ? el('h2', { text: title }) : '',
-    el('p', { class: 'question', text: question }), body);
-  $('#sections').append(sec);
-  if (setup) { setup(body); return; }
-  if (!endpoint) { body.append(el('p', { class: 'pending', text: 'Pending' })); return; }
-  body.append(el('p', { class: 'pending', text: 'Loading…' }));
-  fetchJson(endpoint).then(d => { body.replaceChildren(); render(d, body); })
-    .catch(e => { body.replaceChildren(el('p', { class: 'error', text: 'Could not load data (' + e.message + ').' })); });
-}
-
-/* ---------- BQ12 ---------- */
-const TIMES = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
-const PLACES = ['HOME', 'UNIVERSITY', 'OTHER', 'UNLABELED'];
-
-function heatColor(rate) {
-  const a = 0.12 + 0.7 * rate;
-  return `rgba(63,143,138,${a.toFixed(2)})`;
-}
-
-function renderBq12Result(d, out) {
-  out.replaceChildren();
-  const cats = Object.keys(d.outcomesByCategory).concat(d.groups.map(g => g.category))
-    .filter((c, i, a) => a.indexOf(c) === i).sort();
-  if (!cats.length) {
-    out.append(el('p', { class: 'pending', text: `No visible data for this range. ${d.suppressedGroups} group(s) hidden by the user threshold, ${d.ignoredPending} open visit(s) ignored.` }));
-    return;
-  }
-  const sel = el('select', {}, cats.map(c => el('option', { value: c, text: c })));
-  const heat = el('div', { class: 'scroll' });
-  const drawHeat = () => {
-    const cat = sel.value;
-    const by = {}; d.groups.filter(g => g.category === cat).forEach(g => by[g.timeOfDay + '|' + g.placeLabel] = g);
-    const extraT = [...new Set(d.groups.map(g => g.timeOfDay))].filter(t => !TIMES.includes(t));
-    const rows = TIMES.concat(extraT);
-    const t = el('table', { class: 'heat' },
-      el('tr', {}, el('th'), PLACES.map(p => el('th', { text: p }))),
-      rows.map(tod => el('tr', {}, el('th', { class: 'row', text: tod }),
-        PLACES.map(pl => {
-          const g = by[tod + '|' + pl];
-          if (!g) return el('td', { class: 'hidden', text: 'Hidden or no data', title: 'Fewer users than the threshold, or nothing shown here' });
-          const td = el('td', { title: `${g.users} users` }, pct(g.acceptanceRate), el('small', { text: `${g.accepted}/${g.shown}` }));
-          td.style.background = heatColor(g.acceptanceRate); return td;
-        }))));
-    heat.replaceChildren(t);
-  };
-  sel.addEventListener('change', () => { drawHeat(); drawBars(); });
-
-  const bars = el('div', { class: 'cols' });
-  const drawBars = () => {
-    const cat = sel.value;
-    const o = d.outcomesByCategory[cat];
-    const r = d.declineReasonsByCategory[cat] || {};
-    const left = el('div', {}, el('h3', { text: 'Outcomes' }));
-    left.append(o ? barChart([{ label: cat, parts: [
-      { value: o.accepted, color: 'var(--bar-a)', title: 'Accepted' },
-      { value: o.otherActivity, color: 'var(--bar-b)', title: 'Other activity' },
-      { value: o.noActivity - o.inferred, color: 'var(--bar-c)', title: 'No activity' },
-      { value: o.inferred, color: 'var(--line)', title: 'No activity (inferred)' }] }])
-      : el('p', { class: 'pending', text: 'Hidden or no data' }));
-    left.append(el('p', { class: 'legend', text: o ? `Accepted ${o.accepted} · Other activity ${o.otherActivity} · No activity ${o.noActivity} (inferred ${o.inferred})` : '' }));
-    const right = el('div', {}, el('h3', { text: 'Why not accepted' }));
-    const entries = Object.entries(r).sort((a, b) => b[1] - a[1]);
-    right.append(entries.length
-      ? barChart(entries.map(([k, v]) => ({ label: k, parts: [{ value: v, color: 'var(--bar-b)', title: k }] })))
-      : el('p', { class: 'pending', text: 'No declines recorded' }));
-    bars.replaceChildren(left, right);
-  };
-
-  out.append(
-    el('label', {}, 'Category', sel),
-    el('h3', { text: 'Acceptance rate by time of day and place' }), heat,
-    el('p', { class: 'legend', text: `Based on ${d.interactionsConsidered} visits (${d.from} to ${d.to}); ${d.suppressedGroups} group(s) hidden; ${d.ignoredPending} open visit(s) ignored.` }),
-    bars);
-  drawHeat(); drawBars();
-}
-
-function addBq12() {
-  const today = new Date().toISOString().slice(0, 10);
-  const monthAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-  const from = el('input', { type: 'date', value: monthAgo });
-  const to = el('input', { type: 'date', value: today });
-  const minUsers = el('input', { type: 'number', min: 1, value: 5, style: 'width:80px' });
-  const go = el('button', { text: 'Update' });
-  const out = el('div');
-  const load = () => {
-    out.replaceChildren(el('p', { class: 'pending', text: 'Loading…' }));
-    const q = new URLSearchParams({ from: from.value, to: to.value, minUsers: minUsers.value });
-    fetchJson('/api/analytics/bq12?' + q).then(d => renderBq12Result(d, out))
-      .catch(e => out.replaceChildren(el('p', { class: 'error', text: 'Could not load data (' + e.message + ').' })));
-  };
-  go.addEventListener('click', load);
-
-  addSection({ id: 'bq12', bq: 'BQ12', owner: 'Sara', title: 'Where and when are offline activities accepted?',
-    question: 'At which times and places do users accept each category of offline activity the most?',
-    setup: body => {
-      body.append(
-        el('div', { class: 'controls' }, el('label', {}, 'From', from), el('label', {}, 'To', to),
-          el('label', {}, 'Min. users', minUsers), go),
-        out,
-        el('p', { class: 'note', text: 'To protect privacy, a cell is hidden when fewer than the chosen number of distinct users contributed to it (k-anonymity). Place comes from the labels Home / University / Other; no GPS coordinates are read or shown. Acceptance rate = accepted suggestions ÷ suggestions shown.' }));
-      load();
-    } });
-}
-addBq12();
-
-/* ---------- Focus (Valentina) ---------- */
-addSection({ id: 'focus', bq: 'Focus', owner: 'Valentina', title: 'Focus Mode sessions',
-  question: 'How are Focus Mode sessions going overall?', endpoint: '/api/analytics/focus',
-  render: (d, body) => {
-    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
-    body.append(el('div', { class: 'kpis' },
-      kpi(d.totalSessions, 'Total sessions'),
-      kpi(d.completedSessions, 'Completed'),
-      kpi(d.abandonedSessions, 'Abandoned'),
-      kpi(d.completionPercentage.toFixed(1) + '%', 'Completion'),
-      kpi(Math.round(d.averageDurationSeconds) + ' s', 'Average duration')));
-  } });
-
-/* ---------- BQ16 (Laura) ---------- */
-addSection({
-  id: 'bq16',
-  bq: 'BQ16',
-  owner: 'Laura',
-  title: 'Mindful vs. Impulsive Pickups Analysis',
-  question: 'What percentage of un-pickups are intentional versus impulsive, and during which hours of the day do impulsive pickups occur most frequently?',
-  endpoint: '/api/analytics/bq16',
-  render: (d, body) => {
-    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
-    
-    // KPI Cards
-    const kpiContainer = el('div', { class: 'kpis' },
-      kpi(d.mindfulPercentage.toFixed(1) + '%', 'Mindful Pickups'),
-      kpi(d.impulsivePercentage.toFixed(1) + '%', 'Impulsive Pickups')
-    );
-
-    // Hourly Bar Chart
-    const hours = Object.entries(d.impulsivePickupsByHour || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
-    const chartRows = hours.map(([hour, count]) => ({
-      label: `${hour.padStart(2, '0')}:00`,
-      parts: [{ value: count, color: 'var(--bar-a)', title: `Hour ${hour}:00` }]
-    }));
-
-    const hourlySection = el('div', { style: 'margin-top: 16px;' },
-      el('h3', { text: 'Impulsive Pickups Distribution by Hour' }),
-      chartRows.length ? barChart(chartRows) : el('p', { class: 'pending', text: 'No hourly data recorded' })
-    );
-
-    body.append(kpiContainer, hourlySection);
-  }
-});
-
-/* ---------- BQ17 (Laura) ---------- */
-addSection({
-  id: 'bq17',
-  bq: 'BQ17',
-  owner: 'Laura',
-  title: 'Focus Sessions Success & Time Blocks',
-  question: 'What is the completion success rate of focus sessions across different duration categories, and during which time blocks of the day do users successfully complete the highest number of focus sessions?',
-  endpoint: '/api/analytics/bq17',
-  render: (d, body) => {
-    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
-    
-    // Tarjetas para tasas de éxito por duración
-    const successRows = Object.entries(d.successRateByCategory || {}).map(([cat, stats]) => ({
-      label: cat,
-      parts: [
-        { value: stats.completed, color: 'var(--bar-a)', title: 'Completed' },
-        { value: stats.total - stats.completed, color: 'var(--line)', title: 'Abandoned/Other' }
-      ]
-    }));
-
-    const durationSection = el('div', {},
-      el('h3', { text: 'Success Rate by Duration Category' }),
-      successRows.length ? barChart(successRows) : el('p', { class: 'pending', text: 'No duration data available' })
-    );
-
-    // Gráfico por bloques de tiempo
-    const timeRows = Object.entries(d.successfulSessionsByTimeBlock || {}).map(([block, count]) => ({
-      label: block,
-      parts: [{ value: count, color: 'var(--bar-b)', title: block }]
-    }));
-
-    const timeSection = el('div', { style: 'margin-top: 16px;' },
-      el('h3', { text: 'Successful Sessions by Time Block' }),
-      timeRows.length ? barChart(timeRows) : el('p', { class: 'pending', text: 'No time block data available' })
-    );
-
-    body.append(durationSection, timeSection);
-  }
-});
-  /* ---------- BQ8 (Juan Felipe) ---------- */
-addSection({ id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', title: 'Does the virtual pet help users focus longer?',
-  question: 'Do users with an active virtual pet complete longer uninterrupted Focus Mode/Pomodoro sessions than users without one?',
-  endpoint: '/api/analytics/bq8',
-  render: (d, body) => {
-    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
-    const group = (name, g) => g.hidden
-      ? el('p', { class: 'pending', text: `${name}: hidden (fewer than ${d.minUsers} users).` })
-      : el('div', {}, el('h3', { text: name }), el('div', { class: 'kpis' },
-          kpi(g.users, 'Users'),
-          kpi(g.sessions, 'Focus sessions'),
-          kpi(g.avgCompletedMinutes.toFixed(1) + ' min', 'Avg. completed session'),
-          kpi(pct(g.completionRate), 'Completed without interruption')));
-
-    body.append(group('With active pet', d.withPet), group('Without pet', d.withoutPet));
-
-    if (d.differenceMinutes !== null) {
-      body.append(el('h3', { text: 'Average completed session (minutes)' }), barChart([
-        { label: 'With pet', parts: [{ value: +d.withPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-a)', title: 'Minutes' }] },
-        { label: 'Without pet', parts: [{ value: +d.withoutPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-b)', title: 'Minutes' }] },
-      ]));
-      const diff = d.differenceMinutes;
-      body.append(el('p', { class: 'note', text: diff >= 0
-        ? `Users with an active pet complete sessions ${diff.toFixed(1)} min longer on average.`
-        : `Users with an active pet complete sessions ${Math.abs(diff).toFixed(1)} min shorter on average.` }));
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BreakLoop Analytics</title>
+  <style>
+    :root {
+      --bg: #f5f7f6;
+      --card: #ffffff;
+      --ink: #28373a;
+      --muted: #6b7c80;
+      --line: #dfe6e5;
+      --accent: #3f8f8a;
+      --accent-soft: #e3f1ef;
+      --hidden: #eceff0;
+      --bar-a: #6fb3a8;
+      --bar-b: #a9c6dd;
+      --bar-c: #d9c9a3;
     }
-    body.append(el('p', { class: 'note', text: 'Uninterrupted = session with status COMPLETED. Users are grouped by their current activePetId. A group is hidden when fewer than the minimum number of distinct users contributed.' }));
-  } });
 
-/* ---------- Pending sections ---------- */
-[
-  { id: 'bq6', bq: 'BQ6', owner: 'Pablo', question: 'How much screen time does the user avoid after accepting a personalized offline activity recommendation?' },
-  { id: 'bq2', bq: 'BQ2', owner: 'Hernán', question: 'Which device models experience the highest battery consumption while running BreakLoop?' },
-  { id: 'bq14', bq: 'BQ14', owner: 'Valentina', question: 'Is there a relationship between phone-checking frequency, time on flagged apps, and Focus Mode completion?' },
-].forEach(addSection);
-</script>
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1b2426;
+        --card: #243032;
+        --ink: #e2ebeb;
+        --muted: #94a6a9;
+        --line: #35464a;
+        --accent: #6fb3a8;
+        --accent-soft: #2c4244;
+        --hidden: #2b383b;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    header,
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 16px;
+    }
+
+    header {
+      padding-top: 28px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin: 0 0 4px;
+      font-weight: 600;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    section.card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 2px 10px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin: 0 0 4px;
+      font-weight: 600;
+    }
+
+    .question {
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+
+    .pending {
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      font-size: 12px;
+      color: var(--muted);
+      gap: 3px;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card);
+      color: var(--ink);
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .note {
+      font-size: 13px;
+      color: var(--muted);
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 14px;
+    }
+
+    .error {
+      color: #8a5a44;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin: 18px 0 8px;
+      font-weight: 600;
+    }
+
+    .scroll {
+      overflow-x: auto;
+    }
+
+    table.heat {
+      border-collapse: separate;
+      border-spacing: 4px;
+      width: 100%;
+      min-width: 420px;
+    }
+
+    .heat th {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .heat th.row {
+      text-align: left;
+    }
+
+    .heat td {
+      text-align: center;
+      border-radius: 8px;
+      padding: 10px 6px;
+      font-size: 13px;
+    }
+
+    .heat td small {
+      display: block;
+      color: inherit;
+      opacity: .75;
+    }
+
+    .heat td.hidden {
+      background: var(--hidden);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .bars {
+      display: grid;
+      gap: 6px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 40px;
+      gap: 8px;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .bar-track {
+      background: var(--hidden);
+      border-radius: 6px;
+      height: 14px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .bar-track span {
+      height: 100%;
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .kpi {
+      background: var(--bg);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .kpi b {
+      display: block;
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .kpi span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    footer {
+      max-width: 960px;
+      margin: 0 auto 32px;
+      padding: 0 16px;
+      font-size: 12px;
+      color: var(--muted);
+
+    }
+
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+      align-items: stretch;
+    }
+
+    .chart-card {
+      position: relative;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      min-width: 0;
+    }
+
+    .chart-card h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 260px;
+    }
+
+    @media (max-width: 700px) {
+      .charts {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-container {
+        height: 240px;
+      }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+  <header>
+    <h1>BreakLoop Analytics</h1>
+    <p>Business questions answered from anonymized, aggregated app data.</p>
+  </header>
+  <main id="sections"></main>
+  <footer>No user identifiers or coordinates are shown anywhere on this page.</footer>
+
+  <script>
+    /* ---------- Helpers ---------- */
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const el = (tag, attrs = {}, ...kids) => {
+      const n = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else n.setAttribute(k, v);
+      }
+      kids.flat().forEach(c => n.append(c));
+      return n;
+    };
+    const pct = x => (x * 100).toFixed(0) + '%';
+    const fetchJson = async url => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    };
+
+    /* Horizontal stacked bars. rows: [{label, parts:[{value, color, title}]}] */
+    function barChart(rows) {
+      const max = Math.max(1, ...rows.map(r => r.parts.reduce((s, p) => s + p.value, 0)));
+      return el('div', { class: 'bars' }, rows.map(r => {
+        const total = r.parts.reduce((s, p) => s + p.value, 0);
+        return el('div', { class: 'bar-row' },
+          el('div', { text: r.label }),
+          el('div', { class: 'bar-track' }, r.parts.map(p => {
+            const s = el('span', { title: `${p.title}: ${p.value}` });
+            s.style.width = (p.value / max * 100) + '%'; s.style.background = p.color; return s;
+          })),
+          el('div', { text: total }));
+      }));
+    }
+
+    /* ---------- Section registry ---------- */
+    function addSection({ id, bq, owner, title, question, endpoint, render, setup }) {
+      const body = el('div');
+      const sec = el('section', { class: 'card', id },
+        el('span', { class: 'tag', text: `${bq} · ${owner}` }),
+        title ? el('h2', { text: title }) : '',
+        el('p', { class: 'question', text: question }), body);
+      $('#sections').append(sec);
+      if (setup) { setup(body); return; }
+      if (!endpoint) { body.append(el('p', { class: 'pending', text: 'Pending' })); return; }
+      body.append(el('p', { class: 'pending', text: 'Loading…' }));
+      fetchJson(endpoint).then(d => { body.replaceChildren(); render(d, body); })
+        .catch(e => { body.replaceChildren(el('p', { class: 'error', text: 'Could not load data (' + e.message + ').' })); });
+    }
+
+    /* ---------- BQ12 ---------- */
+    const TIMES = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
+    const PLACES = ['HOME', 'UNIVERSITY', 'OTHER', 'UNLABELED'];
+
+    function heatColor(rate) {
+      const a = 0.12 + 0.7 * rate;
+      return `rgba(63,143,138,${a.toFixed(2)})`;
+    }
+
+    function renderBq12Result(d, out) {
+      out.replaceChildren();
+      const cats = Object.keys(d.outcomesByCategory).concat(d.groups.map(g => g.category))
+        .filter((c, i, a) => a.indexOf(c) === i).sort();
+      if (!cats.length) {
+        out.append(el('p', { class: 'pending', text: `No visible data for this range. ${d.suppressedGroups} group(s) hidden by the user threshold, ${d.ignoredPending} open visit(s) ignored.` }));
+        return;
+      }
+      const sel = el('select', {}, cats.map(c => el('option', { value: c, text: c })));
+      const heat = el('div', { class: 'scroll' });
+      const drawHeat = () => {
+        const cat = sel.value;
+        const by = {}; d.groups.filter(g => g.category === cat).forEach(g => by[g.timeOfDay + '|' + g.placeLabel] = g);
+        const extraT = [...new Set(d.groups.map(g => g.timeOfDay))].filter(t => !TIMES.includes(t));
+        const rows = TIMES.concat(extraT);
+        const t = el('table', { class: 'heat' },
+          el('tr', {}, el('th'), PLACES.map(p => el('th', { text: p }))),
+          rows.map(tod => el('tr', {}, el('th', { class: 'row', text: tod }),
+            PLACES.map(pl => {
+              const g = by[tod + '|' + pl];
+              if (!g) return el('td', { class: 'hidden', text: 'Hidden or no data', title: 'Fewer users than the threshold, or nothing shown here' });
+              const td = el('td', { title: `${g.users} users` }, pct(g.acceptanceRate), el('small', { text: `${g.accepted}/${g.shown}` }));
+              td.style.background = heatColor(g.acceptanceRate); return td;
+            }))));
+        heat.replaceChildren(t);
+      };
+      sel.addEventListener('change', () => { drawHeat(); drawBars(); });
+
+      const bars = el('div', { class: 'cols' });
+      const drawBars = () => {
+        const cat = sel.value;
+        const o = d.outcomesByCategory[cat];
+        const r = d.declineReasonsByCategory[cat] || {};
+        const left = el('div', {}, el('h3', { text: 'Outcomes' }));
+        left.append(o ? barChart([{
+          label: cat, parts: [
+            { value: o.accepted, color: 'var(--bar-a)', title: 'Accepted' },
+            { value: o.otherActivity, color: 'var(--bar-b)', title: 'Other activity' },
+            { value: o.noActivity - o.inferred, color: 'var(--bar-c)', title: 'No activity' },
+            { value: o.inferred, color: 'var(--line)', title: 'No activity (inferred)' }]
+        }])
+          : el('p', { class: 'pending', text: 'Hidden or no data' }));
+        left.append(el('p', { class: 'legend', text: o ? `Accepted ${o.accepted} · Other activity ${o.otherActivity} · No activity ${o.noActivity} (inferred ${o.inferred})` : '' }));
+        const right = el('div', {}, el('h3', { text: 'Why not accepted' }));
+        const entries = Object.entries(r).sort((a, b) => b[1] - a[1]);
+        right.append(entries.length
+          ? barChart(entries.map(([k, v]) => ({ label: k, parts: [{ value: v, color: 'var(--bar-b)', title: k }] })))
+          : el('p', { class: 'pending', text: 'No declines recorded' }));
+        bars.replaceChildren(left, right);
+      };
+
+      out.append(
+        el('label', {}, 'Category', sel),
+        el('h3', { text: 'Acceptance rate by time of day and place' }), heat,
+        el('p', { class: 'legend', text: `Based on ${d.interactionsConsidered} visits (${d.from} to ${d.to}); ${d.suppressedGroups} group(s) hidden; ${d.ignoredPending} open visit(s) ignored.` }),
+        bars);
+      drawHeat(); drawBars();
+    }
+
+    function addBq12() {
+      const today = new Date().toISOString().slice(0, 10);
+      const monthAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+      const from = el('input', { type: 'date', value: monthAgo });
+      const to = el('input', { type: 'date', value: today });
+      const minUsers = el('input', { type: 'number', min: 1, value: 5, style: 'width:80px' });
+      const go = el('button', { text: 'Update' });
+      const out = el('div');
+      const load = () => {
+        out.replaceChildren(el('p', { class: 'pending', text: 'Loading…' }));
+        const q = new URLSearchParams({ from: from.value, to: to.value, minUsers: minUsers.value });
+        fetchJson('/api/analytics/bq12?' + q).then(d => renderBq12Result(d, out))
+          .catch(e => out.replaceChildren(el('p', { class: 'error', text: 'Could not load data (' + e.message + ').' })));
+      };
+      go.addEventListener('click', load);
+
+      addSection({
+        id: 'bq12', bq: 'BQ12', owner: 'Sara', title: 'Where and when are offline activities accepted?',
+        question: 'At which times and places do users accept each category of offline activity the most?',
+        setup: body => {
+          body.append(
+            el('div', { class: 'controls' }, el('label', {}, 'From', from), el('label', {}, 'To', to),
+              el('label', {}, 'Min. users', minUsers), go),
+            out,
+            el('p', { class: 'note', text: 'To protect privacy, a cell is hidden when fewer than the chosen number of distinct users contributed to it (k-anonymity). Place comes from the labels Home / University / Other; no GPS coordinates are read or shown. Acceptance rate = accepted suggestions ÷ suggestions shown.' }));
+          load();
+        }
+      });
+    }
+    addBq12();
+
+    /* ---------- Bq4 (Valentina) ---------- */
+
+    let focusStatusChart = null;
+    let focusCountChart = null;
+
+
+    addSection({
+      id: 'focus',
+      bq: 'BQ4',
+      owner: 'Valentina Jiménez',
+      title: 'Focus Mode – Session Effectiveness',
+      question: 'How much does Focus Mode help users maintain uninterrupted study or work sessions?',
+      endpoint: '/api/analytics/focus',
+
+      render: (d, body) => {
+
+        const total = Number(d.totalSessions ?? 0);
+        const completed = Number(d.completedSessions ?? 0);
+        const abandoned = Number(d.abandonedSessions ?? 0);
+        const completion = Number(d.completionPercentage ?? 0);
+        const duration = Number(d.averageDurationSeconds ?? 0);
+
+        const other = Math.max(
+          0,
+          total - completed - abandoned
+        );
+
+        // KPI cards
+        const kpi = (value, label) =>
+          el('div', { class: 'kpi' },
+            el('b', { text: value }),
+            el('span', { text: label })
+          );
+
+        body.append(
+          el('div', { class: 'kpis' },
+            kpi(total, 'Total sessions'),
+            kpi(completed, 'Completed'),
+            kpi(abandoned, 'Abandoned'),
+            kpi(completion.toFixed(1) + '%', 'Completion rate'),
+            kpi(duration.toFixed(1), 'Average duration (raw value)')
+          )
+        );
+
+        // Charts layout
+        const charts = el('div', { class: 'charts' });
+
+        // Doughnut chart
+        const statusCard = el('div', { class: 'chart-card' });
+
+        statusCard.append(
+          el('h3', { text: 'Session status distribution' })
+        );
+
+        const statusContainer = el('div', {
+          class: 'chart-container'
+        });
+
+        const statusCanvas = el('canvas');
+        statusContainer.append(statusCanvas);
+        statusCard.append(statusContainer);
+
+        // Bar chart
+        const countCard = el('div', { class: 'chart-card' });
+
+        countCard.append(
+          el('h3', { text: 'Number of sessions by status' })
+        );
+
+        const countContainer = el('div', {
+          class: 'chart-container'
+        });
+
+        const countCanvas = el('canvas');
+        countContainer.append(countCanvas);
+        countCard.append(countContainer);
+
+        charts.append(statusCard, countCard);
+        body.append(charts);
+
+        // Destroy previous charts before refreshing
+        if (focusStatusChart) {
+          focusStatusChart.destroy();
+          focusStatusChart = null;
+        }
+
+        if (focusCountChart) {
+          focusCountChart.destroy();
+          focusCountChart = null;
+        }
+
+        const labels = [
+          'Completed',
+          'Abandoned',
+          'Other states'
+        ];
+
+        const values = [
+          completed,
+          abandoned,
+          other
+        ];
+
+        // Doughnut chart
+        focusStatusChart = new Chart(statusCanvas, {
+          type: 'doughnut',
+
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              backgroundColor: [
+                '#70B5A8',
+                '#DDBE83',
+                '#A9C7DC'
+              ],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }]
+          },
+
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+
+            plugins: {
+              legend: {
+                position: 'top'
+              }
+            }
+          }
+        });
+
+        // Vertical bar chart
+        focusCountChart = new Chart(countCanvas, {
+          type: 'bar',
+
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Sessions',
+              data: values,
+              backgroundColor: '#83B9D9',
+              borderRadius: 4
+            }]
+          },
+
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              }
+            },
+
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  precision: 0
+                }
+              }
+            }
+          }
+        });
+      }
+    });
+    /* ---------- BQ16 (Laura) ---------- */
+    addSection({
+      id: 'bq16',
+      bq: 'BQ16',
+      owner: 'Laura',
+      title: 'Mindful vs. Impulsive Pickups Analysis',
+      question: 'What percentage of un-pickups are intentional versus impulsive, and during which hours of the day do impulsive pickups occur most frequently?',
+      endpoint: '/api/analytics/bq16',
+      render: (d, body) => {
+        const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+
+        // KPI Cards
+        const kpiContainer = el('div', { class: 'kpis' },
+          kpi(d.mindfulPercentage.toFixed(1) + '%', 'Mindful Pickups'),
+          kpi(d.impulsivePercentage.toFixed(1) + '%', 'Impulsive Pickups')
+        );
+
+        // Hourly Bar Chart
+        const hours = Object.entries(d.impulsivePickupsByHour || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+        const chartRows = hours.map(([hour, count]) => ({
+          label: `${hour.padStart(2, '0')}:00`,
+          parts: [{ value: count, color: 'var(--bar-a)', title: `Hour ${hour}:00` }]
+        }));
+
+        const hourlySection = el('div', { style: 'margin-top: 16px;' },
+          el('h3', { text: 'Impulsive Pickups Distribution by Hour' }),
+          chartRows.length ? barChart(chartRows) : el('p', { class: 'pending', text: 'No hourly data recorded' })
+        );
+
+        body.append(kpiContainer, hourlySection);
+      }
+    });
+
+    /* ---------- BQ17 (Laura) ---------- */
+    addSection({
+      id: 'bq17',
+      bq: 'BQ17',
+      owner: 'Laura',
+      title: 'Focus Sessions Success & Time Blocks',
+      question: 'What is the completion success rate of focus sessions across different duration categories, and during which time blocks of the day do users successfully complete the highest number of focus sessions?',
+      endpoint: '/api/analytics/bq17',
+      render: (d, body) => {
+        const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+
+        // Tarjetas para tasas de éxito por duración
+        const successRows = Object.entries(d.successRateByCategory || {}).map(([cat, stats]) => ({
+          label: cat,
+          parts: [
+            { value: stats.completed, color: 'var(--bar-a)', title: 'Completed' },
+            { value: stats.total - stats.completed, color: 'var(--line)', title: 'Abandoned/Other' }
+          ]
+        }));
+
+        const durationSection = el('div', {},
+          el('h3', { text: 'Success Rate by Duration Category' }),
+          successRows.length ? barChart(successRows) : el('p', { class: 'pending', text: 'No duration data available' })
+        );
+
+        // Gráfico por bloques de tiempo
+        const timeRows = Object.entries(d.successfulSessionsByTimeBlock || {}).map(([block, count]) => ({
+          label: block,
+          parts: [{ value: count, color: 'var(--bar-b)', title: block }]
+        }));
+
+        const timeSection = el('div', { style: 'margin-top: 16px;' },
+          el('h3', { text: 'Successful Sessions by Time Block' }),
+          timeRows.length ? barChart(timeRows) : el('p', { class: 'pending', text: 'No time block data available' })
+        );
+
+        body.append(durationSection, timeSection);
+      }
+    });
+    /* ---------- BQ8 (Juan Felipe) ---------- */
+    addSection({
+      id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', title: 'Does the virtual pet help users focus longer?',
+      question: 'Do users with an active virtual pet complete longer uninterrupted Focus Mode/Pomodoro sessions than users without one?',
+      endpoint: '/api/analytics/bq8',
+      render: (d, body) => {
+        const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+        const group = (name, g) => g.hidden
+          ? el('p', { class: 'pending', text: `${name}: hidden (fewer than ${d.minUsers} users).` })
+          : el('div', {}, el('h3', { text: name }), el('div', { class: 'kpis' },
+            kpi(g.users, 'Users'),
+            kpi(g.sessions, 'Focus sessions'),
+            kpi(g.avgCompletedMinutes.toFixed(1) + ' min', 'Avg. completed session'),
+            kpi(pct(g.completionRate), 'Completed without interruption')));
+
+        body.append(group('With active pet', d.withPet), group('Without pet', d.withoutPet));
+
+        if (d.differenceMinutes !== null) {
+          body.append(el('h3', { text: 'Average completed session (minutes)' }), barChart([
+            { label: 'With pet', parts: [{ value: +d.withPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-a)', title: 'Minutes' }] },
+            { label: 'Without pet', parts: [{ value: +d.withoutPet.avgCompletedMinutes.toFixed(1), color: 'var(--bar-b)', title: 'Minutes' }] },
+          ]));
+          const diff = d.differenceMinutes;
+          body.append(el('p', {
+            class: 'note', text: diff >= 0
+              ? `Users with an active pet complete sessions ${diff.toFixed(1)} min longer on average.`
+              : `Users with an active pet complete sessions ${Math.abs(diff).toFixed(1)} min shorter on average.`
+          }));
+        }
+        body.append(el('p', { class: 'note', text: 'Uninterrupted = session with status COMPLETED. Users are grouped by their current activePetId. A group is hidden when fewer than the minimum number of distinct users contributed.' }));
+      }
+    });
+
+
+    /* ---------- BQ17 (Valentina) ---------- */
+
+    addSection({
+      id: 'bq17',
+      bq: 'BQ17',
+      owner: 'Valentina Jiménez',
+      title: 'Focus Sessions – Duration and Time Analysis',
+      question: 'What is the completion success rate of focus sessions across different duration categories, and during which time blocks of the day do users successfully complete the highest number of focus sessions?',
+      endpoint: '/api/analytics/focus/sprint3',
+
+      render: (d, body) => {
+
+        const durationStats = d.durationStats ?? [];
+        const timeBlockStats = d.timeBlockStats ?? [];
+
+        // Completion rate by duration category
+        body.append(
+          el('h3', {
+            text: 'Completion Rate by Duration Category'
+          })
+        );
+
+        if (durationStats.length) {
+
+          const durationRows = durationStats.map(item => {
+
+            const total = Number(item.totalSessions ?? 0);
+            const completed = Number(item.completedSessions ?? 0);
+            const notCompleted = Math.max(0, total - completed);
+            const rate = Number(item.completionRate ?? 0);
+
+            return {
+              label: `${item.durationCategory} (${rate.toFixed(1)}%)`,
+              parts: [
+                {
+                  value: completed,
+                  color: 'var(--bar-a)',
+                  title: 'Completed'
+                },
+                {
+                  value: notCompleted,
+                  color: 'var(--bar-c)',
+                  title: 'Not completed'
+                }
+              ]
+            };
+          });
+
+          body.append(barChart(durationRows));
+
+        } else {
+          body.append(
+            el('p', {
+              class: 'pending',
+              text: 'No duration data available.'
+            })
+          );
+        }
+
+        // Completed sessions by time block
+        body.append(
+          el('h3', {
+            text: 'Completed Sessions by Time of Day'
+          })
+        );
+
+        if (timeBlockStats.length) {
+
+          const timeRows = timeBlockStats.map(item => ({
+            label: item.timeBlock,
+            parts: [{
+              value: Number(item.completedSessions ?? 0),
+              color: 'var(--bar-b)',
+              title: 'Completed sessions'
+            }]
+          }));
+
+          body.append(barChart(timeRows));
+
+          const highest = timeBlockStats.reduce(
+            (max, item) =>
+              Number(item.completedSessions ?? 0) >
+                Number(max.completedSessions ?? 0)
+                ? item
+                : max,
+            timeBlockStats[0]
+          );
+
+          body.append(
+            el('p', {
+              class: 'note',
+              text: `Highest completion period: ${highest.timeBlock} (${highest.completedSessions} completed sessions).`
+            })
+          );
+
+        } else {
+          body.append(
+            el('p', {
+              class: 'pending',
+              text: 'No time block data available.'
+            })
+          );
+        }
+      }
+    });
+
+    /* ---------- Pending sections ---------- */
+    [
+      { id: 'bq6', bq: 'BQ6', owner: 'Pablo', question: 'How much screen time does the user avoid after accepting a personalized offline activity recommendation?' },
+      { id: 'bq2', bq: 'BQ2', owner: 'Hernán', question: 'Which device models experience the highest battery consumption while running BreakLoop?' },
+
+    ].forEach(addSection);
+  </script>
 </body>
+
 </html>

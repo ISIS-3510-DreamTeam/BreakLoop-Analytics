@@ -1,6 +1,8 @@
+
 package com.dreamteam.breakloop_analytics.controller;
 
 import com.dreamteam.breakloop_analytics.model.FocusAnalytics;
+import com.dreamteam.breakloop_analytics.model.FocusSprint3Analytics;
 import com.dreamteam.breakloop_analytics.service.AnalyticsService;
 import com.google.cloud.firestore.Firestore;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,8 +34,17 @@ public class AnalyticsController {
         return "Analytics Service connected to Firestore";
     }
 
+    // BQ4
     @GetMapping("/focus")
     public FocusAnalytics getFocusAnalytics() throws Exception {
         return analyticsService.getFocusAnalytics();
+    }
+
+    // BQ17 - Sprint 3
+    @GetMapping("/focus/sprint3")
+    public FocusSprint3Analytics getFocusSprint3Analytics()
+            throws Exception {
+
+        return analyticsService.getFocusSprint3Analytics();
     }
 }
