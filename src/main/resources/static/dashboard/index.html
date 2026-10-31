@@ -98,13 +98,7 @@ function barChart(rows) {
   }));
 }
 
-/* ---------- Section registry ----------
- * Add a section with ONE call:
- *   addSection({ id, bq, owner, title, question, endpoint, render })
- * - endpoint: URL returning JSON (omit => section shows "pending")
- * - render(data, body): fill the `body` element from the fetched data.
- * - setup(body): alternative for sections with their own controls (like BQ12).
- */
+/* ---------- Section registry ---------- */
 function addSection({ id, bq, owner, title, question, endpoint, render, setup }) {
   const body = el('div');
   const sec = el('section', { class: 'card', id },
@@ -124,7 +118,6 @@ const TIMES = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
 const PLACES = ['HOME', 'UNIVERSITY', 'OTHER', 'UNLABELED'];
 
 function heatColor(rate) {
-  // soft teal scale: light -> deeper teal
   const a = 0.12 + 0.7 * rate;
   return `rgba(63,143,138,${a.toFixed(2)})`;
 }
@@ -228,6 +221,78 @@ addSection({ id: 'focus', bq: 'Focus', owner: 'Valentina', title: 'Focus Mode se
       kpi(Math.round(d.averageDurationSeconds) + ' s', 'Average duration')));
   } });
 
+/* ---------- BQ16 (Laura) ---------- */
+addSection({
+  id: 'bq16',
+  bq: 'BQ16',
+  owner: 'Laura',
+  title: 'Mindful vs. Impulsive Pickups Analysis',
+  question: 'What percentage of un-pickups are intentional versus impulsive, and during which hours of the day do impulsive pickups occur most frequently?',
+  endpoint: '/api/analytics/bq16',
+  render: (d, body) => {
+    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+    
+    // KPI Cards
+    const kpiContainer = el('div', { class: 'kpis' },
+      kpi(d.mindfulPercentage.toFixed(1) + '%', 'Mindful Pickups'),
+      kpi(d.impulsivePercentage.toFixed(1) + '%', 'Impulsive Pickups')
+    );
+
+    // Hourly Bar Chart
+    const hours = Object.entries(d.impulsivePickupsByHour || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+    const chartRows = hours.map(([hour, count]) => ({
+      label: `${hour.padStart(2, '0')}:00`,
+      parts: [{ value: count, color: 'var(--bar-a)', title: `Hour ${hour}:00` }]
+    }));
+
+    const hourlySection = el('div', { style: 'margin-top: 16px;' },
+      el('h3', { text: 'Impulsive Pickups Distribution by Hour' }),
+      chartRows.length ? barChart(chartRows) : el('p', { class: 'pending', text: 'No hourly data recorded' })
+    );
+
+    body.append(kpiContainer, hourlySection);
+  }
+});
+
+/* ---------- BQ17 (Laura) ---------- */
+addSection({
+  id: 'bq17',
+  bq: 'BQ17',
+  owner: 'Laura',
+  title: 'Focus Sessions Success & Time Blocks',
+  question: 'What is the completion success rate of focus sessions across different duration categories, and during which time blocks of the day do users successfully complete the highest number of focus sessions?',
+  endpoint: '/api/analytics/bq17',
+  render: (d, body) => {
+    const kpi = (v, l) => el('div', { class: 'kpi' }, el('b', { text: v }), el('span', { text: l }));
+    
+    // Tarjetas para tasas de éxito por duración
+    const successRows = Object.entries(d.successRateByCategory || {}).map(([cat, stats]) => ({
+      label: cat,
+      parts: [
+        { value: stats.completed, color: 'var(--bar-a)', title: 'Completed' },
+        { value: stats.total - stats.completed, color: 'var(--line)', title: 'Abandoned/Other' }
+      ]
+    }));
+
+    const durationSection = el('div', {},
+      el('h3', { text: 'Success Rate by Duration Category' }),
+      successRows.length ? barChart(successRows) : el('p', { class: 'pending', text: 'No duration data available' })
+    );
+
+    // Gráfico por bloques de tiempo
+    const timeRows = Object.entries(d.successfulSessionsByTimeBlock || {}).map(([block, count]) => ({
+      label: block,
+      parts: [{ value: count, color: 'var(--bar-b)', title: block }]
+    }));
+
+    const timeSection = el('div', { style: 'margin-top: 16px;' },
+      el('h3', { text: 'Successful Sessions by Time Block' }),
+      timeRows.length ? barChart(timeRows) : el('p', { class: 'pending', text: 'No time block data available' })
+    );
+
+    body.append(durationSection, timeSection);
+  }
+});
   /* ---------- BQ8 (Juan Felipe) ---------- */
 addSection({ id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', title: 'Does the virtual pet help users focus longer?',
   question: 'Do users with an active virtual pet complete longer uninterrupted Focus Mode/Pomodoro sessions than users without one?',
@@ -262,7 +327,6 @@ addSection({ id: 'bq8', bq: 'BQ8', owner: 'Juan Felipe', title: 'Does the virtua
   { id: 'bq6', bq: 'BQ6', owner: 'Pablo', question: 'How much screen time does the user avoid after accepting a personalized offline activity recommendation?' },
   { id: 'bq2', bq: 'BQ2', owner: 'Hernán', question: 'Which device models experience the highest battery consumption while running BreakLoop?' },
   { id: 'bq14', bq: 'BQ14', owner: 'Valentina', question: 'Is there a relationship between phone-checking frequency, time on flagged apps, and Focus Mode completion?' },
-  { id: 'bq7', bq: 'BQ7', owner: 'Laura', question: 'Do users who used Check Counter longer show a greater reduction in weekly pickups?' },
 ].forEach(addSection);
 </script>
 </body>
